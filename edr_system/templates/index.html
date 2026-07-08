@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Security EDR Dashboard</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <h1>🛡️ SECURITY MONITORING SYSTEM</h1>
+                <div class="header-info">
+                    <span id="time" class="time"></span>
+                    <span id="status" class="status-badge" style="background: #22c55e;">● Online</span>
+                </div>
+            </div>
+        </header>
+
+        <!-- Navigation Tabs -->
+        <nav class="nav-tabs">
+            <button class="nav-tab active" data-tab="overview">Overview</button>
+            <button class="nav-tab" data-tab="processes">Processes</button>
+            <button class="nav-tab" data-tab="network">Network</button>
+            <button class="nav-tab" data-tab="startup">Startup</button>
+            <button class="nav-tab" data-tab="alerts">Alerts</button>
+        </nav>
+
+        <!-- Main Content -->
+        <main class="main-content">
+
+            <!-- OVERVIEW TAB -->
+            <section id="overview-tab" class="tab-content active">
+                <div class="grid grid-2">
+                    <!-- System Status Card -->
+                    <div class="card">
+                        <h2>System Status</h2>
+                        <div class="metric">
+                            <label>CPU Usage</label>
+                            <div class="progress-bar">
+                                <div id="cpu-bar" class="progress-fill" style="width: 0%"></div>
+                            </div>
+                            <span id="cpu-percent">0%</span>
+                        </div>
+                        <div class="metric">
+                            <label>Memory Usage</label>
+                            <div class="progress-bar">
+                                <div id="memory-bar" class="progress-fill" style="width: 0%"></div>
+                            </div>
+                            <span id="memory-percent">0%</span>
+                        </div>
+                        <div class="metric">
+                            <label>Disk Usage</label>
+                            <div class="progress-bar">
+                                <div id="disk-bar" class="progress-fill" style="width: 0%"></div>
+                            </div>
+                            <span id="disk-percent">0%</span>
+                        </div>
+                    </div>
+
+                    <!-- Security Summary -->
+                    <div class="card">
+                        <h2>Security Status</h2>
+                        <div class="status-grid">
+                            <div class="status-item">
+                                <span class="label">Threats Detected</span>
+                                <span id="threats-count" class="count critical">0</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="label">Active Processes</span>
+                                <span id="process-count" class="count">0</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="label">Connections</span>
+                                <span id="connections-count" class="count">0</span>
+                            </div>
+                            <div class="status-item">
+                                <span class="label">Alerts</span>
+                                <span id="alerts-count" class="count">0</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Quick Actions -->
+                <div class="card">
+                    <h2>Quick Actions</h2>
+                    <div class="button-group">
+                        <button class="btn btn-primary" onclick="setBaseline()">Set Baseline</button>
+                        <button class="btn btn-secondary" onclick="refreshAllData()">Full Scan</button>
+                        <button class="btn btn-secondary" onclick="exportAlerts()">Export Alerts</button>
+                    </div>
+                </div>
+
+                <!-- Top Processes by CPU -->
+                <div class="card">
+                    <h2>Top Processes by CPU</h2>
+                    <table class="data-table">
+                        <thead>
+                            <tr>
+                                <th>PID</th>
+                                <th>Process</th>
+                                <th>CPU %</th>
+                                <th>Memory</th>
+                                <th>Risk</th>
+                            </tr>
+                        </thead>
+                        <tbody id="top-processes">
+                            <tr><td colspan="5" class="text-center">Loading...</td></tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <!-- PROCESSES TAB -->
+            <section id="processes-tab" class="tab-content">
+                <div class="card">
+                    <div class="card-header">
+                        <h2>Process Monitor</h2>
+                        <div class="search-box">
+                            <input type="text" id="process-filter" placeholder="Filter processes..." class="search-input">
+                            <select id="risk-filter" class="filter-select">
+                                <option value="">All Risk Levels</option>
+                                <option value="CRITICAL">CRITICAL</option>
+                                <option value="HIGH">HIGH</option>
+                                <option value="MEDIUM">MEDIUM</option>
+                                <option value="LOW">LOW</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="table-container">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>PID</th>
+                                    <th>Process Name</th>
+                                    <th>Path</th>
+                                    <th>CPU %</th>
+                                    <th>Memory (MB)</th>
+                                    <th>Risk Level</th>
+                                    <th>Factors</th>
+                                    <th>Action</th>
+                                </tr>
+                            </thead>
+                            <tbody id="processes-list">
+                                <tr><td colspan="8" class="text-center">Loading processes...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- NETWORK TAB -->
+            <section id="network-tab" class="tab-content">
+                <div class="grid grid-2">
+                    <!-- Connection Stats -->
+                    <div class="card">
+                        <h2>Connection Statistics</h2>
+                        <div class="stat-box">
+                            <span class="stat-label">Total Connections</span>
+                            <span id="net-total" class="stat-value">0</span>
+                        </div>
+                        <div class="stat-box">
+                            <span class="stat-label">Established</span>
+                            <span id="net-established" class="stat-value">0</span>
+                        </div>
+                        <div class="stat-box">
+                            <span class="stat-label">Listening</span>
+                            <span id="net-listening" class="stat-value">0</span>
+                        </div>
+                        <div class="stat-box">
+                            <span class="stat-label">Suspicious</span>
+                            <span id="net-suspicious" class="stat-value critical">0</span>
+                        </div>
+                    </div>
+
+                    <!-- Filter Controls -->
+                    <div class="card">
+                        <h2>Filters</h2>
+                        <label>
+                            <input type="checkbox" id="conn-filter-suspicious" checked> Show only Suspicious
+                        </label>
+                        <label>
+                            <input type="checkbox" id="conn-filter-established" checked> Established Only
+                        </label>
+                    </div>
+                </div>
+
+                <!-- Network Connections Table -->
+                <div class="card">
+                    <h2>Active Network Connections</h2>
+                    <div class="table-container">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Process</th>
+                                    <th>Local IP:Port</th>
+                                    <th>Remote IP:Port</th>
+                                    <th>Status</th>
+                                    <th>Risk Level</th>
+                                    <th>Details</th>
+                                </tr>
+                            </thead>
+                            <tbody id="network-list">
+                                <tr><td colspan="6" class="text-center">Loading connections...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- STARTUP TAB -->
+            <section id="startup-tab" class="tab-content">
+                <div class="card">
+                    <h2>Startup Programs & Persistence Mechanisms</h2>
+                    <div class="info-box">
+                        <p>⚠️ Review auto-start programs for suspicious entries</p>
+                    </div>
+                    <div class="table-container">
+                        <table class="data-table">
+                            <thead>
+                                <tr>
+                                    <th>Program Name</th>
+                                    <th>Path/Command</th>
+                                    <th>Registry Path</th>
+                                    <th>Risk Level</th>
+                                </tr>
+                            </thead>
+                            <tbody id="startup-list">
+                                <tr><td colspan="4" class="text-center">Loading startup programs...</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+
+            <!-- ALERTS TAB -->
+            <section id="alerts-tab" class="tab-content">
+                <div class="card">
+                    <div class="card-header">
+                        <h2>Security Alerts</h2>
+                        <div class="alert-stats">
+                            <span id="alert-critical-stat" class="badge critical">0 Critical</span>
+                            <span id="alert-high-stat" class="badge high">0 High</span>
+                        </div>
+                    </div>
+                    <div id="alerts-container" class="alerts-list">
+                        <div class="placeholder">Loading alerts...</div>
+                    </div>
+                </div>
+            </section>
+
+        </main>
+    </div>
+
+    <!-- Auto-refresh interval indicator -->
+    <div class="footer">
+        <span>Auto-refreshing every <strong id="refresh-interval">5</strong> seconds | Last update: <span id="last-update">Never</span></span>
+    </div>
+
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
