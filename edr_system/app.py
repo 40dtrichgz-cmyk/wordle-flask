@@ -6,7 +6,6 @@ Flask Backend for Real-time Threat Detection and System Monitoring
 from flask import Flask, jsonify, request, render_template
 from flask_cors import CORS
 import psutil
-import socket
 import json
 import os
 import threading
@@ -15,7 +14,6 @@ import logging
 from datetime import datetime, timedelta
 from collections import defaultdict
 import subprocess
-import hashlib
 from pathlib import Path
 
 # ==================== CONFIGURATION ====================
@@ -23,12 +21,19 @@ from pathlib import Path
 app = Flask(__name__)
 CORS(app)
 
-# Configure logging
+# Security: Use environment variables for configuration
+FLASK_ENV = os.getenv('FLASK_ENV', 'production')
+DEBUG_MODE = os.getenv('FLASK_DEBUG', 'False').lower() == 'true'
+LOG_FILE = os.getenv('LOG_FILE', 'security_alerts.log')
+HOST = os.getenv('FLASK_HOST', '127.0.0.1')
+PORT = int(os.getenv('FLASK_PORT', '5000'))
+
+# Configure logging with proper file handling
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('security_alerts.log'),
+        logging.FileHandler(LOG_FILE),
         logging.StreamHandler()
     ]
 )
@@ -126,8 +131,6 @@ class ThreatDetector:
             risk_score += 15
             risk_factors.append(f'High memory consumption: {memory:.0f}MB')
         
-        # 5. Network behavior (checked separately)
-        
         # Determine risk level
         if risk_score >= 60:
             risk_level = 'CRITICAL'
@@ -204,7 +207,8 @@ class ThreatDetector:
             if first == 127:
                 return True
             return False
-        except:
+        except (ValueError, IndexError, AttributeError):
+            logger.debug(f"Invalid IP format: {ip}")
             return False
     
     def add_alert(self, severity, title, description, recommendation):
@@ -254,19 +258,21 @@ class SecurityMonitor:
                     pinfo = proc.as_dict()
                     
                     # Get path
+                    path = 'N/A'
                     try:
                         path = proc.exe()
-                    except:
-                        path = 'N/A'
+                    except (psutil.AccessDenied, psutil.NoSuchProcess):
+                        pass
                     
                     # Get resources
+                    cpu_percent = 0
+                    memory_mb = 0
                     try:
                         cpu_percent = proc.cpu_percent(interval=0.01)
                         memory_info = proc.memory_info()
                         memory_mb = memory_info.rss / (1024 * 1024)
-                    except:
-                        cpu_percent = 0
-                        memory_mb = 0
+                    except (psutil.AccessDenied, psutil.NoSuchProcess):
+                        pass
                     
                     proc_info = {
                         'pid': pinfo['pid'],
@@ -329,11 +335,12 @@ class SecurityMonitor:
                     }
                     
                     # Get process name
+                    conn_info['process'] = 'Unknown'
                     try:
                         proc = psutil.Process(conn.pid)
                         conn_info['process'] = proc.name()
-                    except:
-                        conn_info['process'] = 'Unknown'
+                    except (psutil.NoSuchProcess, psutil.AccessDenied):
+                        pass
                     
                     # Assess risk
                     risk_assessment = self.detector.assess_connection_risk(conn_info)
@@ -359,7 +366,7 @@ class SecurityMonitor:
                     if risk_assessment['risk_level'] in ['HIGH', 'MEDIUM']:
                         stats['suspicious'] += 1
                 
-                except Exception:
+                except (psutil.NoSuchProcess, psutil.AccessDenied):
                     pass
         
         except Exception as e:
@@ -426,6 +433,7 @@ class SecurityMonitor:
                 ]
                 
                 for autorun_path in autorun_paths:
+                    reg_key = None
                     try:
                         reg_key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, autorun_path)
                         i = 0
@@ -454,12 +462,15 @@ class SecurityMonitor:
                                 i += 1
                             except OSError:
                                 break
-                        
-                        winreg.CloseKey(reg_key)
-                    except:
-                        pass
+                    except (OSError, PermissionError):
+                        logger.debug(f"Could not access registry path: {autorun_path}")
+                    finally:
+                        if reg_key:
+                            winreg.CloseKey(reg_key)
             except ImportError:
                 logger.warning("winreg not available (not on Windows)")
+            except Exception as e:
+                logger.error(f"Error getting startup programs: {e}")
         
         return startup_items
     
@@ -473,28 +484,32 @@ class SecurityMonitor:
                     ['query', 'user'],
                     capture_output=True,
                     text=True,
-                    timeout=5
+                    timeout=5,
+                    check=False
                 )
                 
-                lines = result.stdout.strip().split('\n')
-                for line in lines[1:]:
-                    parts = line.split()
-                    if len(parts) >= 2:
-                        sessions.append({
-                            'username': parts[0],
-                            'session_name': parts[1] if len(parts) > 1 else 'N/A',
-                            'session_id': parts[2] if len(parts) > 2 else 'N/A',
-                            'status': parts[3] if len(parts) > 3 else 'N/A'
-                        })
-                
-                # Alert on multiple sessions
-                if len(sessions) > 2:
-                    self.detector.add_alert(
-                        'MEDIUM',
-                        f'Multiple User Sessions Detected',
-                        f'{len(sessions)} sessions active',
-                        'Verify all sessions are authorized'
-                    )
+                if result.returncode == 0:
+                    lines = result.stdout.strip().split('\n')
+                    for line in lines[1:]:
+                        parts = line.split()
+                        if len(parts) >= 2:
+                            sessions.append({
+                                'username': parts[0],
+                                'session_name': parts[1] if len(parts) > 1 else 'N/A',
+                                'session_id': parts[2] if len(parts) > 2 else 'N/A',
+                                'status': parts[3] if len(parts) > 3 else 'N/A'
+                            })
+                    
+                    # Alert on multiple sessions
+                    if len(sessions) > 2:
+                        self.detector.add_alert(
+                            'MEDIUM',
+                            f'Multiple User Sessions Detected',
+                            f'{len(sessions)} sessions active',
+                            'Verify all sessions are authorized'
+                        )
+            except subprocess.TimeoutExpired:
+                logger.warning("User session query timed out")
             except Exception as e:
                 logger.error(f"Error getting user sessions: {e}")
         
@@ -537,6 +552,7 @@ class SecurityMonitor:
         except psutil.AccessDenied:
             return {'success': False, 'error': 'Access denied'}
         except Exception as e:
+            logger.error(f"Error terminating process {pid}: {e}")
             return {'success': False, 'error': str(e)}
 
 
@@ -558,7 +574,7 @@ def index():
 def api_system():
     """Get system overview"""
     status = monitor.get_system_status()
-    return jsonify(status)
+    return jsonify(status or {})
 
 
 @app.route('/api/processes', methods=['GET'])
@@ -677,7 +693,13 @@ if __name__ == '__main__':
     print("   SECURITY MONITORING SYSTEM - EDR Dashboard")
     print("="*60)
     print("\n✓ Starting Flask server...")
-    print("✓ Navigate to: http://localhost:5000")
+    print(f"✓ Navigate to: http://{HOST}:{PORT}")
     print("✓ Press CTRL+C to stop\n")
     
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    # Security: Disable debug mode in production
+    app.run(
+        debug=DEBUG_MODE,
+        host=HOST,
+        port=PORT,
+        use_reloader=False
+    )
